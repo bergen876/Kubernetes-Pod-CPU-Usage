@@ -1,21 +1,30 @@
 #!/bin/bash
 
-NAMESPACE='enter your namespace'
-NODE_NAME=$(kubectl get pod -n $NAMESPACE -o=jsonpath='{.items[0].spec.nodeName}')
-TOTAL_CPU=$(kubectl describe node $NODE_NAME | grep 'cpu:' | head -n 1 | awk '{print $2}')
-OUTPUT_FILE="cpu_usage.log"
+NAMESPACES=("kube-system" "replace with your namespace" "calico-system")
+OUTPUT_FILE="resource_usage.log"
 
-echo "Timestamp,Pod Name,CPU Usage (%)" > $OUTPUT_FILE
+echo "Timestamp (ms),Namespace,Pod Name,CPU Usage (m),Memory Usage (Mi)" > $OUTPUT_FILE
 
 while true; do
-    TIMESTAMP=$(date +"%Y-%m-%d %H:%M:%S")
-    PODS=$(kubectl get pod -n $NAMESPACE --no-headers -o custom-columns=":metadata.name")
+    TIMESTAMP=$(date +%s%3N)  # Current time in milliseconds
 
-    for POD in $PODS; do
-        CPU_M=$(kubectl top pod $POD -n $NAMESPACE --no-headers | awk '{print $2}' | sed 's/m//')
-        CPU_PERCENT=$(echo "scale=2; ($CPU_M / 1000) / $TOTAL_CPU * 100" | bc)
-        echo "$TIMESTAMP,$POD,$CPU_PERCENT" >> $OUTPUT_FILE
+    for NAMESPACE in "${NAMESPACES[@]}"; do
+        # Get all pod metrics for the namespace in one call
+        kubectl top pod -n $NAMESPACE --no-headers | while read -r POD CPU_MEM; do
+            CPU_M=$(echo $CPU_MEM | awk '{print $1}' | sed 's/m//')
+            MEMORY_M=$(echo $CPU_MEM | awk '{print $2}' | sed 's/Mi//')
+
+            # Debugging output
+            echo "DEBUG: NAMESPACE=$NAMESPACE POD=$POD CPU_M=$CPU_M MEMORY_M=$MEMORY_M"
+
+            if [[ -z "$CPU_M" || -z "$MEMORY_M" ]]; then
+                echo "Skipping logging due to missing values."
+                continue
+            fi
+
+            echo "$TIMESTAMP,$NAMESPACE,$POD,$CPU_M,$MEMORY_M" >> $OUTPUT_FILE
+        done
     done
 
-    sleep 1
+    sleep 0.1
 done
